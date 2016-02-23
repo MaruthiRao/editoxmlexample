@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<blueprint xmlns="http://www.osgi.org/xmlns/blueprint/v1.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:camel="http://camel.apache.org/schema/blueprint"
+	xmlns:cxf="http://camel.apache.org/schema/blueprint/cxf" xmlns:cm="http://aries.apache.org/blueprint/xmlns/blueprint-cm/v1.0.0"
+	xsi:schemaLocation=" 
+		http://camel.apache.org/schema/blueprint http://camel.apache.org/schema/blueprint/camel-blueprint.xsd 
+		http://camel.apache.org/schema/blueprint/cxf http://camel.apache.org/schema/blueprint/cxf/camel-cxf.xsd 
+		http://aries.apache.org/blueprint/xmlns/blueprint-cm/v1.0.0 http://aries.apache.org/schemas/blueprint-cm/blueprint-cm-1.0.0.xsd 
+		http://www.osgi.org/xmlns/blueprint/v1.0.0 https://www.osgi.org/xmlns/blueprint/v1.0.0/blueprint.xsd">
+
+	<!-- This creates an embedded ActiveMQ Broker -->
+	<broker xmlns="http://activemq.apache.org/schema/core" useJmx="true"
+		persistent="false">
+		<transportConnectors>
+			<transportConnector uri="tcp://localhost:61616" />
+		</transportConnectors>
+	</broker>
+
+	<!-- Lets connect the Camel ActiveMQ component to the embedded broker. See 
+		http://camel.apache.org/activemq.html for more information. -->
+	<bean id="activemq" class="org.apache.activemq.camel.component.ActiveMQComponent">
+		<property name="brokerURL" value="failover:tcp://localhost:61616" />
+	</bean>
+
+	<!-- to setup camel servlet with OSGi HttpService -->
+	<reference id="httpService" interface="org.osgi.service.http.HttpService" />
+
+	<bean class="org.apache.camel.component.servlet.osgi.OsgiServletRegisterer"
+		init-method="register" destroy-method="unregister">
+		<property name="alias" value="/editoxml/rest" />
+		<property name="httpService" ref="httpService" />
+		<property name="servlet" ref="camelServlet" />
+	</bean>
+
+	<bean id="traceFormatter"
+		class="org.apache.camel.processor.interceptor.DefaultTraceFormatter">
+		<property name="showBreadCrumb" value="true" />
+		<property name="showProperties" value="true" />
+	</bean>
+
+	<bean id="camelServlet"
+		class="org.apache.camel.component.servlet.CamelHttpTransportServlet" />
+
+	<bean id="ediToxml" class="org.apache.camel.example.rest.EDItoXML" />
+
+	<camelContext trace="true" xmlns="http://camel.apache.org/schema/blueprint">
+  <restConfiguration component="servlet" port="8181" contextPath="/editoxml/rest">
+    <dataFormatProperty key="prettyPrint" value="true"/>
+  </restConfiguration>
+  <rest path="/processClaim" consumes="text/plain" produces="text/plain">
+    <put type="java.lang.String">
+      <description>Receives edi forwards to processedi</description>
+      <to uri="direct:processedi.mq"/>
+    </put>
+  </rest>
+  <route>
+    <from uri="direct:processedi.mq"/>
+    <to uri="bean:ediToxml?method=toXML(${exchange})"/>
+    <!--to uri="direct:processedi.test"/-->
+    <to uri="activemq:queue:inbox"/>
+  </route>
+  <route>
+    <from uri="activemq:queue:inbox"/>
+    <!--from uri="direct:processedi.test"/-->
+    <to uri="file://src/edixmlfiles"/>
+  </route>
+</camelContext>
+
+</blueprint>
